@@ -58,20 +58,21 @@ jobs:
             --configuration=release_arm64 \
             --buildNumber="$BUILD_NUMBER"
 
-          # collect ipa
+                    # collect ipa
           OUTPUT_PATH="build/artifacts"
           rm -rf "$OUTPUT_PATH"
           mkdir -p "$OUTPUT_PATH"
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
-            cp "$f" $OUTPUT_PATH/
-          done
+          ls -la bazel-out || true
+          IPA_FILE=$(find -L bazel-out -name Telegram.ipa -path "*Telegram/Telegram.ipa" 2>/dev/null | head -n 1)
+          echo "IPA found at: $IPA_FILE"
+          test -n "$IPA_FILE"
+          cp "$IPA_FILE" "$OUTPUT_PATH/Telegram.ipa"
 
-          # collect dsym
+          # collect dsym (not critical)
           mkdir -p build/DSYMs
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/*.dSYM; do
-            cp -R "$f" build/DSYMs/
-          done
-          zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null
+          find -L bazel-out -name "*.dSYM" -path "*Telegram/*" 2>/dev/null | head -n 5 | while read f; do cp -R "$f" build/DSYMs/ || true; done
+          zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null || true
+
 
       - name: Create Release
         id: create_release
