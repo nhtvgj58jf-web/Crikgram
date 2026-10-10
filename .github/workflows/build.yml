@@ -37,18 +37,15 @@ jobs:
           mv /Users/Shared/$(basename $GITHUB_WORKSPACE) /Users/Shared/telegram-ios
 
 
+      
       - name: Debug profiles
         run: |
           cd /Users/Shared/telegram-ios
-          echo "=== profiles ==="
-          ls -la build-system/fake-codesigning/profiles || echo "ПАПКИ НЕТ"
-          echo "=== check aps-environment ==="
-          for f in build-system/fake-codesigning/profiles/*.mobileprovision; do
-            echo "== $f"
-            security cms -D -i "$f" | plutil -extract Entitlements.aps-environment raw - 2>&1
-          done
+          echo "=== Telegram profile ==="
+          security cms -D -i build-system/fake-codesigning/profiles/Telegram.mobileprovision | plutil -p - | grep -E "aps-environment|application-identifier|TeamIdentifier|Name" || true
           echo "=== config ==="
-          grep -E "bundle_id|team_id" build-system/appstore-configuration.json
+          grep -E "bundle_id|team_id" build-system/appstore-configuration.json || true
+
 
 
       - name: Build the App
