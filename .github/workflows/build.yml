@@ -10,6 +10,14 @@ jobs:
   build:
     runs-on: macos-26
 
+
+
+    permissions:
+      contents: write
+
+
+
+
     steps:
       - uses: actions/checkout@v2
         with:
@@ -72,6 +80,21 @@ jobs:
           mkdir -p build/DSYMs
           find -L bazel-out -name "*.dSYM" -path "*Telegram/*" 2>/dev/null | head -n 5 | while read f; do cp -R "$f" build/DSYMs/ || true; done
           zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null || true
+
+
+
+
+
+
+      - name: Save IPA as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-ipa
+          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
+
+
+
+
 
 
       - name: Create Release
