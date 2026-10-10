@@ -36,6 +36,21 @@ jobs:
           cp -R $GITHUB_WORKSPACE /Users/Shared/
           mv /Users/Shared/$(basename $GITHUB_WORKSPACE) /Users/Shared/telegram-ios
 
+
+      - name: Debug profiles
+        run: |
+          cd /Users/Shared/telegram-ios
+          echo "=== profiles ==="
+          ls -la build-system/fake-codesigning/profiles || echo "ПАПКИ НЕТ"
+          echo "=== check aps-environment ==="
+          for f in build-system/fake-codesigning/profiles/*.mobileprovision; do
+            echo "== $f"
+            security cms -D -i "$f" | plutil -extract Entitlements.aps-environment raw - 2>&1
+          done
+          echo "=== config ==="
+          grep -E "bundle_id|team_id" build-system/appstore-configuration.json
+
+
       - name: Build the App
         run: |
           set -x
