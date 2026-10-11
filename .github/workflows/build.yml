@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       info_only:
-        description: "Только проверка (слой, где IP и ключ), без сборки"
+        description: "Только проверка (слой, адреса, ключ), без сборки"
         type: boolean
         default: true
 
@@ -25,35 +25,31 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: loyldg/mytelegram-iOS
+          ref: layer224
           path: src
           submodules: recursive
           fetch-depth: 0
 
-      - name: Info (layer, DC addresses, RSA keys)
+      - name: Info (layer, DC addresses, RSA key)
         run: |
           cd src
-          echo "=== layer: invokeWithLayer ==="
-          grep -rnE "invokeWithLayer" submodules --include=*.swift | head -8 || true
-          echo "=== layer: constants ==="
-          grep -rnE "(let|var) +[A-Za-z_]*[Ll]ayer[A-Za-z_]* *(:[^=]*)?= *[0-9]{3}" submodules --include=*.swift | head -10 || true
-          grep -rnE "(LAYER|Layer)[A-Za-z_]* *(=|\\() *@?[0-9]{3}" submodules --include=*.m --include=*.h --include=*.swift | head -10 || true
-          echo "=== layer: apiEnvironment.layer ==="
-          grep -rnE "\\.layer *= *" submodules/TelegramCore/Sources submodules/MtProtoKit/Sources | head -10 || true
-          echo "=== IP addresses in network code ==="
-          grep -rnoE "\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b" submodules/MtProtoKit/Sources submodules/TelegramCore/Sources --include=*.swift --include=*.m | sort -u | head -40 || true
-          echo "=== RSA public keys in MTDatacenterAuthMessageService.m ==="
-          grep -n -A10 "BEGIN RSA PUBLIC KEY" submodules/MtProtoKit/Sources/MTDatacenterAuthMessageService.m | head -80 || true
+          git log -1 --format='%H %s'
+          echo "=== layer ==="
+          grep -rn -A2 "func currentLayer" submodules --include=*.swift | head -10 || true
+          echo "=== DC addresses (Network.swift) ==="
+          grep -n -B4 -A4 "192.168.1.100" submodules/TelegramCore/Sources/Network/Network.swift | head -90 || true
+          echo "=== RSA key (start) ==="
+          grep -n -A2 "BEGIN RSA PUBLIC KEY" submodules/MtProtoKit/Sources/MTDatacenterAuthMessageService.m | head -12 || true
 
       - name: Apply own config and server IP
         env:
           SERVER_IP: ${{ secrets.SERVER_IP }}
         run: |
-          set -x
           test -n "$SERVER_IP"
           cp own/build-system/appstore-configuration.json src/build-system/appstore-configuration.json
           rm -rf src/build-system/fake-codesigning
           cp -R own/build-system/fake-codesigning src/build-system/fake-codesigning
-          grep -rlI "YOUR_SERVER_IP" src --exclude-dir=.git | xargs -I{} sed -i '' "s/YOUR_SERVER_IP/${SERVER_IP}/g" "{}" || true
+          sed -i '' "s/192\.168\.1\.100/${SERVER_IP}/g" src/submodules/TelegramCore/Sources/Network/Network.swift
 
       - name: Set active Xcode path
         if: ${{ !inputs.info_only }}
