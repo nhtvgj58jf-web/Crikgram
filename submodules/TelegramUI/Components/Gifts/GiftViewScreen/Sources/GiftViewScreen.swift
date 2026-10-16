@@ -2144,8 +2144,31 @@ private final class GiftViewSheetContent: CombinedComponent {
             }
         }
         
+        private func failUpgradeForm() {
+            guard self.scheduledUpgradeCommit else {
+                return
+            }
+            self.scheduledUpgradeCommit = false
+            self.inProgress = false
+            self.updated()
+            
+            let presentationData = self.context.sharedContext.currentPresentationData.with { $0 }
+            if let controller = self.getController() {
+                controller.present(textAlertController(
+                    context: self.context,
+                    title: nil,
+                    text: presentationData.strings.Login_UnknownError,
+                    actions: [
+                        TextAlertAction(type: .defaultAction, title: presentationData.strings.Common_OK, action: {})
+                    ],
+                    parseMarkdown: false
+                ), in: .window(.root))
+            }
+        }
+        
         private func fetchUpgradeForm() {
             guard let reference = self.subject.arguments?.reference else {
+                self.failUpgradeForm()
                 return
             }
             self.upgradeForm = nil
@@ -2161,6 +2184,8 @@ private final class GiftViewSheetContent: CombinedComponent {
                     self.scheduledUpgradeCommit = false
                     self.commitUpgrade()
                 }
+            }, error: { [weak self] _ in
+                self?.failUpgradeForm()
             })
         }
         
