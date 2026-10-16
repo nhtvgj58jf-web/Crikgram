@@ -38,6 +38,11 @@ func addSynchronizeRecentlyUsedMediaOperation(transaction: Transaction, category
 }
 
 func addRecentlyUsedSticker(transaction: Transaction, fileReference: FileMediaReference) {
+    for attribute in fileReference.media.attributes {
+        if case .CustomEmoji = attribute {
+            return
+        }
+    }
     if let resource = fileReference.media.resource as? CloudDocumentMediaResource {
         if let entry = CodableEntry(RecentMediaItem(fileReference.media)) {
             transaction.addOrMoveToFirstPositionOrderedItemListItem(collectionId: Namespaces.OrderedItemList.CloudRecentStickers, item: OrderedItemListEntry(id: RecentMediaItemId(fileReference.media.fileId).rawValue, contents: entry), removeTailIfCountExceeds: 20)
