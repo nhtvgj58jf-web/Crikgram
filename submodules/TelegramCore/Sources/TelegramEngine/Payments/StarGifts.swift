@@ -3579,10 +3579,8 @@ extension ProfileGiftsContext.State.StarGift {
             } else if let msgId {
                 if let fromPeer = self.fromPeer {
                     self.reference = .message(messageId: EngineMessage.Id(peerId: fromPeer.id, namespace: Namespaces.Message.Cloud, id: msgId))
-                } else if case .unique = gift {
-                    self.reference = .message(messageId: EngineMessage.Id(peerId: PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(0)), namespace: Namespaces.Message.Cloud, id: msgId))
                 } else {
-                    self.reference = nil
+                    self.reference = .message(messageId: EngineMessage.Id(peerId: PeerId(namespace: Namespaces.Peer.CloudUser, id: PeerId.Id._internalFromInt64Value(0)), namespace: Namespaces.Message.Cloud, id: msgId))
                 }
             } else {
                 self.reference = nil
