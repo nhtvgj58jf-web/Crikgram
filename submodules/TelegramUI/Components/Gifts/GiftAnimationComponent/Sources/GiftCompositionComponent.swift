@@ -114,6 +114,8 @@ public final class GiftCompositionComponent: Component {
         
         private let background = ComponentView<Empty>()
         private var animationNode: AnimatedStickerNode?
+        private var staticStickerLayer: InlineStickerItemLayer?
+        private var staticStickerFileId: Int64?
         
         private var disposables = DisposableSet()
         private var fetchedFiles = Set<Int64>()
@@ -961,7 +963,51 @@ public final class GiftCompositionComponent: Component {
                 animationTransition = .immediate
             }
             
-            if let file = animationFile, self.animationNode == nil {
+            let isStaticStickerFile = animationFile?.mimeType == "image/webp"
+            if let file = animationFile, isStaticStickerFile {
+                if self.staticStickerLayer == nil || self.staticStickerFileId != file.fileId.id {
+                    self.staticStickerLayer?.removeFromSuperlayer()
+                    let emoji = ChatTextInputTextCustomEmojiAttribute(
+                        interactivelySelectedFromPackId: nil,
+                        fileId: file.fileId.id,
+                        file: file
+                    )
+                    let stickerLayer = InlineStickerItemLayer(
+                        context: .account(component.context),
+                        userLocation: .other,
+                        attemptSynchronousLoad: false,
+                        emoji: emoji,
+                        file: file,
+                        cache: component.context.animationCache,
+                        renderer: component.context.animationRenderer,
+                        unique: false,
+                        placeholderColor: UIColor(white: 1.0, alpha: 0.1),
+                        pointSize: CGSize(width: iconSize.width * 2.0, height: iconSize.height * 2.0),
+                        loopCount: 1
+                    )
+                    stickerLayer.isVisibleForAnimations = true
+                    self.layer.addSublayer(stickerLayer)
+                    self.staticStickerLayer = stickerLayer
+                    self.staticStickerFileId = file.fileId.id
+                }
+                if let stickerLayer = self.staticStickerLayer {
+                    var stickerSize = iconSize
+                    if let scale = component.animationScale {
+                        stickerSize = CGSize(width: stickerSize.width * scale, height: stickerSize.height * scale)
+                    }
+                    let stickerOffset = component.animationOffset ?? .zero
+                    stickerLayer.frame = CGRect(
+                        origin: CGPoint(x: availableSize.width / 2.0 + stickerOffset.x - stickerSize.width / 2.0, y: 88.0 + stickerOffset.y - stickerSize.height / 2.0),
+                        size: stickerSize
+                    )
+                }
+            } else if let stickerLayer = self.staticStickerLayer {
+                stickerLayer.removeFromSuperlayer()
+                self.staticStickerLayer = nil
+                self.staticStickerFileId = nil
+            }
+            
+            if let file = animationFile, !isStaticStickerFile, self.animationNode == nil {
                 animationTransition = .immediate
                 let node = DefaultAnimatedStickerNodeImpl(lottieSettings: component.context.lottieRenderingSettings)
                 node.isUserInteractionEnabled = false
