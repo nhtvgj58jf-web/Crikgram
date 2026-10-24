@@ -62,6 +62,20 @@ def sub_all_ip(root, exts):
                 p.write_text(s.replace(OLD_IP, ip), encoding="utf-8"); c += 1; print("IP", p)
     if not c: die("заглушка IP не найдена")
 
+
+def add_client(path, pkg):
+    """Добавляет в google-services.json клиента с новым id, СТАРЫЕ оставляет:
+    модули Gradle могут искать любой из двух пакетов."""
+    import json, copy
+    d = json.loads(path.read_text(encoding="utf-8"))
+    have = {c["client_info"]["android_client_info"]["package_name"] for c in d.get("client", [])}
+    if pkg in have: print("OK (уже есть)", path); return
+    for c in list(d.get("client", [])):
+        n = copy.deepcopy(c)
+        n["client_info"]["android_client_info"]["package_name"] = pkg
+        d["client"].append(n); break
+    path.write_text(json.dumps(d, indent=2), encoding="utf-8"); print("OK", path, "пакеты:", sorted(have | {pkg}))
+
 def android(root):
     k = load_key(); pem = pkcs1(k); fp = fingerprint(k)
     pkg = os.environ.get("APP_PACKAGE", "").strip()
@@ -76,8 +90,10 @@ def android(root):
         if "APP_PACKAGE" in s:
             gp.write_text(re.sub(r"^APP_PACKAGE\s*=.*$", "APP_PACKAGE=" + pkg, s, flags=re.M)); print("OK", gp)
     for gj in pathlib.Path(root).rglob("google-services.json"):
-        s = gj.read_text()
-        gj.write_text(re.sub(r'("package_name"\s*:\s*)"[^"]*"', r'\1"%s"' % pkg, s)); print("OK", gj)
+        add_client(gj, pkg)
+    for bg in pathlib.Path(root).rglob("build.gradle*"):  # диагностика: где задан applicationId
+        for i, l in enumerate(bg.read_text(errors="ignore").splitlines(), 1):
+            if "applicationId" in l or "APP_PACKAGE" in l: print("APPID", bg, i, l.strip()[:120])
     if name:
         for x in pathlib.Path(root).rglob("strings*.xml"):
             s = x.read_text(encoding="utf-8", errors="ignore")
