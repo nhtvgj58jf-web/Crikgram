@@ -1,0 +1,64 @@
+name: Android-APK
+on:
+  workflow_dispatch:
+    inputs:
+      app_package:
+        description: "Свой applicationId (не org.telegram.*)"
+        default: "app.crikgram.messenger"
+      app_name:
+        description: "Имя приложения"
+        default: "Crikgram"
+      client_repo:
+        default: "loyldg/mytelegram-android"
+      client_ref:
+        default: "layer224"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: own }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.client_repo }}
+          ref: ${{ inputs.client_ref }}
+          path: src
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install cryptography
+      - name: Patch server + app id
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          RSA_PUBLIC_PEM: ${{ secrets.RSA_PUBLIC_PEM }}
+          APP_PACKAGE: ${{ inputs.app_package }}
+          APP_NAME: ${{ inputs.app_name }}
+        run: python own/.github/scripts/patch_client.py android src
+      - name: Keystore
+        working-directory: src
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p TMessagesProj/config
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > TMessagesProj/config/release.keystore
+            echo "SIGN_ALIAS=$KS_ALIAS" >> $GITHUB_ENV; echo "SIGN_PASS=$KS_PASS" >> $GITHUB_ENV
+          else
+            keytool -genkeypair -keystore TMessagesProj/config/release.keystore -alias crik -keyalg RSA -keysize 2048 -validity 10000 -storepass crik123456 -keypass crik123456 -dname "CN=Crikgram"
+            echo "SIGN_ALIAS=crik" >> $GITHUB_ENV; echo "SIGN_PASS=crik123456" >> $GITHUB_ENV
+          fi
+      - name: Build
+        working-directory: src
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          chmod +x gradlew
+          ./gradlew :TMessagesProj_App:assembleAfatRelease --no-daemon \
+            -PRELEASE_STORE_PASSWORD="$SIGN_PASS" -PRELEASE_KEY_ALIAS="$SIGN_ALIAS" -PRELEASE_KEY_PASSWORD="$SIGN_PASS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crikgram-apk
+          path: src/TMessagesProj_App/build/outputs/apk/**/*.apk
