@@ -41,27 +41,40 @@ jobs:
         run: python own/.github/scripts/patch_client.py desktop TBuild/tdesktop
       - uses: ilammy/msvc-dev-cmd@v1
         with: { arch: x64 }
-      - name: Cache libraries
-        id: libs
-        uses: actions/cache@v4
+      # Кэш с прогрессом: у каждого запуска свой ключ, а restore-keys берёт самый свежий
+      # прошлый кэш с тем же хэшем prepare.py. prepare.py сам пропускает уже собранные библиотеки.
+      - name: Restore libraries cache
+        uses: actions/cache/restore@v4
         with:
           path: |
             TBuild/Libraries
             TBuild/ThirdParty
-          key: libs-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/prepare.py') }}
-      - name: Build libraries (долго, первый раз 2-4 ч)
-        if: steps.libs.outputs.cache-hit != 'true'
+          key: libs-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/prepare.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            libs-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/prepare.py') }}-
+      - name: Build libraries (до 3 попыток, прогресс сохраняется)
+        id: build_libs
+        continue-on-error: true
         shell: cmd
         working-directory: TBuild
-        run: python tdesktop\Telegram\build\prepare\prepare.py silent
+        run: |
+          for /L %%i in (1,1,3) do (
+            python tdesktop\Telegram\build\prepare\prepare.py silent && exit /b 0
+            echo Attempt %%i failed, retrying
+          )
+          exit /b 1
       - name: Save libraries cache
-        if: steps.libs.outputs.cache-hit != 'true'
+        if: ${{ always() && steps.build_libs.conclusion != 'skipped' }}
         uses: actions/cache/save@v4
         with:
           path: |
             TBuild/Libraries
             TBuild/ThirdParty
-          key: libs-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/prepare.py') }}
+          key: libs-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/prepare.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Stop if libraries failed
+        if: ${{ steps.build_libs.outcome == 'failure' }}
+        shell: cmd
+        run: exit /b 1
       - name: Configure
         shell: cmd
         working-directory: TBuild/tdesktop/Telegram
