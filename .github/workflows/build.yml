@@ -1,191 +1,42 @@
-name: CI-mytelegram
+name: Inspect-clients
 
 on:
   workflow_dispatch:
-    inputs:
-      info_only:
-        description: "Только проверка без сборки (по умолчанию выключено = полная сборка)"
-        type: boolean
-        default: false
 
 jobs:
-  build:
-    runs-on: macos-26
-
-    permissions:
-      contents: write
-
+  inspect:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout own repo (config)
+      - name: Checkout loyldg/mytelegram-android
         uses: actions/checkout@v4
         with:
-          path: own
+          repository: loyldg/mytelegram-android
+          path: android
 
-      - name: Checkout loyldg/mytelegram-iOS
+      - name: Checkout loyldg/mytelegram-tdesktop
         uses: actions/checkout@v4
         with:
-          repository: loyldg/mytelegram-iOS
-          ref: layer224
-          path: src
-          submodules: recursive
-          fetch-depth: 0
+          repository: loyldg/mytelegram-tdesktop
+          path: tdesktop
 
-      - name: Info (layer, DC addresses, RSA key)
+      - name: Android info
         run: |
-          cd src
-          git log -1 --format='%H %s'
-          echo "=== layer ==="
-          grep -rn -A2 "func currentLayer" submodules --include=*.swift | head -10 || true
-          echo "=== DC addresses (Network.swift) ==="
-          grep -n -B4 -A4 "192.168.1.100" submodules/TelegramCore/Sources/Network/Network.swift | head -90 || true
-          echo "=== RSA key (start) ==="
-          grep -n -A2 "BEGIN RSA PUBLIC KEY" submodules/MtProtoKit/Sources/MTDatacenterAuthMessageService.m | head -12 || true
+          cd android
+          echo "=== branches ==="; git ls-remote --heads https://github.com/loyldg/mytelegram-android | sed 's/.*refs\/heads\///' | head -30
+          echo "=== default branch / last commit ==="; git log -1 --format='%H %ad %s'
+          echo "=== top level ==="; ls
+          echo "=== layer ==="; grep -rn "LAYER = " --include=*.java . | head -5 || true
+          echo "=== RSA key ==="; grep -rln "BEGIN RSA PUBLIC KEY" . | head -10 || true
+          echo "=== DC addresses (192.168 / 10. / localhost) ==="; grep -rn -E "192\.168\.[0-9]+\.[0-9]+" --include=*.java --include=*.cpp --include=*.h --include=*.gradle . | head -20 || true
+          echo "=== applicationId ==="; grep -rn "applicationId" --include=*.gradle . | head -10 || true
+          echo "=== workflows ==="; ls .github/workflows 2>/dev/null || echo none
 
-      - name: Apply own config, server IP and RSA key
-        env:
-          SERVER_IP: ${{ secrets.SERVER_IP }}
-          RSA_PUBLIC_PEM: ${{ secrets.RSA_PUBLIC_PEM }}
+      - name: Desktop info
         run: |
-          test -n "$SERVER_IP"
-          test -n "$RSA_PUBLIC_PEM"
-          cp own/build-system/appstore-configuration.json src/build-system/appstore-configuration.json
-          rm -rf src/build-system/fake-codesigning
-          cp -R own/build-system/fake-codesigning src/build-system/fake-codesigning
-          sed -i '' "s/192\.168\.1\.100/${SERVER_IP}/g" src/submodules/TelegramCore/Sources/Network/Network.swift
-          python3 - <<'PY'
-          import os, re, sys
-          pem = os.environ["RSA_PUBLIC_PEM"].strip().splitlines()
-          pem = [l.strip() for l in pem if l.strip()]
-          if pem[0] != "-----BEGIN RSA PUBLIC KEY-----" or pem[-1] != "-----END RSA PUBLIC KEY-----":
-              print("RSA_PUBLIC_PEM must be in PKCS#1 format (BEGIN RSA PUBLIC KEY)")
-              sys.exit(1)
-          body = pem[1:-1]
-          literal = '@"-----BEGIN RSA PUBLIC KEY-----\\n"' + "".join('\n             "%s\\n"' % l for l in body) + '\n             "-----END RSA PUBLIC KEY-----"'
-          path = "src/submodules/MtProtoKit/Sources/MTDatacenterAuthMessageService.m"
-          src = open(path, encoding="utf-8").read()
-          pattern = re.compile(r'@"-----BEGIN RSA PUBLIC KEY-----\\n"\s*(?:"[^"\n]*"\s*)*?"-----END RSA PUBLIC KEY-----"')
-          new, n = pattern.subn(lambda m: literal, src)
-          print("replaced RSA key blocks:", n)
-          if n < 1:
-              sys.exit(1)
-          open(path, "w", encoding="utf-8").write(new)
-          PY
-          echo "=== RSA key after replace ==="
-          grep -n -A2 "BEGIN RSA PUBLIC KEY" src/submodules/MtProtoKit/Sources/MTDatacenterAuthMessageService.m | head -12
-
-      - name: Set active Xcode path
-        if: ${{ !inputs.info_only }}
-        run: |
-          cd src
-          XCODE_VERSION=$(cat versions.json | python3 -c 'import json,sys;obj=json.load(sys.stdin);print(obj["xcode"]);')
-          if [ -d "/Applications/Xcode_$XCODE_VERSION.app" ]; then
-            sudo xcode-select -s /Applications/Xcode_$XCODE_VERSION.app/Contents/Developer
-          else
-            echo "Xcode $XCODE_VERSION not found, using default"
-            ls /Applications | grep -i xcode || true
-          fi
-
-      - name: Create canonical source directory
-        if: ${{ !inputs.info_only }}
-        run: |
-          set -x
-          sudo mkdir -p /Users/Shared
-          cp -R "$GITHUB_WORKSPACE/src" /Users/Shared/telegram-ios
-
-      - name: Debug profiles
-        if: ${{ !inputs.info_only }}
-        run: |
-          cd /Users/Shared/telegram-ios
-          echo "=== Telegram profile ==="
-          security cms -D -i build-system/fake-codesigning/profiles/Telegram.mobileprovision | plutil -p - | grep -E "aps-environment|application-identifier|TeamIdentifier|Name" || true
-          echo "=== config ==="
-          grep -E "bundle_id|team_id" build-system/appstore-configuration.json || true
-
-      - name: Build the App
-        if: ${{ !inputs.info_only }}
-        run: |
-          set -x
-
-          SOURCE_DIR=/Users/Shared/telegram-ios
-          BAZEL_USER_ROOT="/private/var/tmp/_bazel_containerhost"
-
-          cd $SOURCE_DIR
-
-          BUILD_NUMBER_OFFSET="$(cat build_number_offset)"
-
-          export APP_VERSION=$(cat versions.json | python3 -c 'import json,sys;obj=json.load(sys.stdin);print(obj["app"]);')
-          export COMMIT_COUNT=$(git rev-list --count HEAD)
-          export COMMIT_COUNT="$(($COMMIT_COUNT+$BUILD_NUMBER_OFFSET))"
-          export BUILD_NUMBER="$COMMIT_COUNT"
-          echo "BUILD_NUMBER=$(echo $BUILD_NUMBER)" >> $GITHUB_ENV
-          echo "APP_VERSION=$(echo $APP_VERSION)" >> $GITHUB_ENV
-
-          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
-          python3 -u build-system/Make/Make.py \
-            --overrideXcodeVersion \
-            --bazelUserRoot="$BAZEL_USER_ROOT" \
-            build \
-            --configurationPath="build-system/appstore-configuration.json" \
-            --codesigningInformationPath=build-system/fake-codesigning \
-            --configuration=release_arm64 \
-            --buildNumber="$BUILD_NUMBER"
-
-          # collect ipa
-          OUTPUT_PATH="build/artifacts"
-          rm -rf "$OUTPUT_PATH"
-          mkdir -p "$OUTPUT_PATH"
-          ls -la bazel-out || true
-          IPA_FILE=$(find -L bazel-out -name Telegram.ipa -path "*Telegram/Telegram.ipa" 2>/dev/null | head -n 1)
-          echo "IPA found at: $IPA_FILE"
-          test -n "$IPA_FILE"
-          cp "$IPA_FILE" "$OUTPUT_PATH/Telegram.ipa"
-
-          # collect dsym (not critical)
-          mkdir -p build/DSYMs
-          find -L bazel-out -name "*.dSYM" -path "*Telegram/*" 2>/dev/null | head -n 5 | while read f; do cp -R "$f" build/DSYMs/ || true; done
-          zip -r "./$OUTPUT_PATH/Telegram.DSYMs.zip" build/DSYMs 1>/dev/null || true
-
-      - name: Save IPA as artifact
-        if: ${{ !inputs.info_only }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: mytelegram-ipa
-          path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
-
-      - name: Create Release
-        if: ${{ !inputs.info_only }}
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: mt224-${{ env.BUILD_NUMBER }}
-          release_name: MyTelegram iOS ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
-          body: |
-            An unsigned build of mytelegram-iOS ${{ env.APP_VERSION }} (${{ env.BUILD_NUMBER }})
-          draft: false
-          prerelease: false
-
-      - name: Upload Release IPA
-        if: ${{ !inputs.info_only }}
-        id: upload-release-ipa
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.ipa
-          asset_name: Telegram.ipa
-          asset_content_type: application/zip
-
-      - name: Upload Release DSYM
-        if: ${{ !inputs.info_only }}
-        id: upload-release-dsym
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: /Users/Shared/telegram-ios/build/artifacts/Telegram.DSYMs.zip
-          asset_name: Telegram.DSYMs.zip
-          asset_content_type: application/zip
+          cd tdesktop
+          echo "=== branches ==="; git ls-remote --heads https://github.com/loyldg/mytelegram-tdesktop | sed 's/.*refs\/heads\///' | head -30
+          echo "=== default branch / last commit ==="; git log -1 --format='%H %ad %s'
+          echo "=== top level ==="; ls
+          echo "=== RSA key ==="; grep -rln "BEGIN RSA PUBLIC KEY" . | head -10 || true
+          echo "=== DC addresses ==="; grep -rn -E "192\.168\.[0-9]+\.[0-9]+" --include=*.cpp --include=*.h --include=*.txt --include=*.cmake . | head -20 || true
+          echo "=== workflows ==="; ls .github/workflows 2>/dev/null || echo none
