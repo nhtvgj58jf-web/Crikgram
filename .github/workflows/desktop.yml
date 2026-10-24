@@ -58,8 +58,13 @@ jobs:
       - name: Fix libvpx Debug (убрать -gcv8)
         shell: bash
         run: |
-          f=TBuild/Libraries/patches/build_libvpx_win.sh
-          if [ ! -f "$f" ]; then echo "нет $f (кэш пуст), правка не применена"; exit 0; fi
+          f=$(find TBuild/Libraries -maxdepth 4 -name build_libvpx_win.sh 2>/dev/null | head -1)
+          if [ -z "$f" ]; then
+            echo "build_libvpx_win.sh не найден, правка не применена. Каталоги:"
+            find TBuild/Libraries -maxdepth 2 -type d 2>/dev/null | head -40
+            exit 0
+          fi
+          echo "нашёл: $f"
           if grep -q "gcv8-fix" "$f"; then echo "правка уже есть"; else
             cat > "$f.new" <<'EOS'
           # gcv8-fix: nasm 3.x падает на -gcv8, убираем флаг в генераторе проекта
