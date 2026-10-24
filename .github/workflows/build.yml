@@ -1,4 +1,4 @@
-name: Inspect-clients
+name: Inspect-clients-2
 
 on:
   workflow_dispatch:
@@ -7,36 +7,40 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout loyldg/mytelegram-android
+      - name: Checkout android layer224
         uses: actions/checkout@v4
         with:
           repository: loyldg/mytelegram-android
+          ref: layer224
           path: android
 
-      - name: Checkout loyldg/mytelegram-tdesktop
+      - name: Checkout tdesktop layer224
         uses: actions/checkout@v4
         with:
           repository: loyldg/mytelegram-tdesktop
+          ref: layer224
           path: tdesktop
 
-      - name: Android info
+      - name: Android details
         run: |
           cd android
-          echo "=== branches ==="; git ls-remote --heads https://github.com/loyldg/mytelegram-android | sed 's/.*refs\/heads\///' | head -30
-          echo "=== default branch / last commit ==="; git log -1 --format='%H %ad %s'
-          echo "=== top level ==="; ls
-          echo "=== layer ==="; grep -rn "LAYER = " --include=*.java . | head -5 || true
-          echo "=== RSA key ==="; grep -rln "BEGIN RSA PUBLIC KEY" . | head -10 || true
-          echo "=== DC addresses (192.168 / 10. / localhost) ==="; grep -rn -E "192\.168\.[0-9]+\.[0-9]+" --include=*.java --include=*.cpp --include=*.h --include=*.gradle . | head -20 || true
-          echo "=== applicationId ==="; grep -rn "applicationId" --include=*.gradle . | head -10 || true
-          echo "=== workflows ==="; ls .github/workflows 2>/dev/null || echo none
+          git log -1 --format='%H %ad %s'
+          echo "=== LAYER ==="; grep -n "LAYER = " TMessagesProj/src/main/java/org/telegram/tgnet/TLRPC.java | head -3
+          echo "=== gradle.properties ==="; cat gradle.properties | sed -E 's/((pass|key|store)[A-Za-z_]*=).*/\1<HIDDEN>/I'
+          echo "=== BuildVars ==="; grep -n -E "APP_ID|APP_HASH|BUILD_VERSION|PLAYSTORE|DEBUG_VERSION" TMessagesProj/src/main/java/org/telegram/messenger/BuildVars.java | sed -E 's/(APP_HASH *= *)"[^"]*"/\1"<hash>"/' | head -12
+          echo "=== ConnectionsManager IP ==="; grep -n -B6 -A10 '192.168.1.100' TMessagesProj/jni/tgnet/ConnectionsManager.cpp | head -60
+          echo "=== Datacenter.cpp RSA ==="; grep -n -B3 -A14 'BEGIN RSA PUBLIC KEY' TMessagesProj/jni/tgnet/Datacenter.cpp | head -70
+          echo "=== Handshake.cpp RSA ==="; grep -n -B3 -A14 'BEGIN RSA PUBLIC KEY' TMessagesProj/jni/tgnet/Handshake.cpp | head -70
+          echo "=== modules/variants ==="; ls TMessagesProj_AppStandalone; cat settings.gradle | head -30
+          echo "=== google-services ==="; grep -rn "google-services" --include=*.gradle . | head -10; ls TMessagesProj/google-services.json TMessagesProj_App/google-services.json 2>&1 | head
+          echo "=== README ==="; head -60 README.md
 
-      - name: Desktop info
+      - name: Desktop details
         run: |
           cd tdesktop
-          echo "=== branches ==="; git ls-remote --heads https://github.com/loyldg/mytelegram-tdesktop | sed 's/.*refs\/heads\///' | head -30
-          echo "=== default branch / last commit ==="; git log -1 --format='%H %ad %s'
-          echo "=== top level ==="; ls
-          echo "=== RSA key ==="; grep -rln "BEGIN RSA PUBLIC KEY" . | head -10 || true
-          echo "=== DC addresses ==="; grep -rn -E "192\.168\.[0-9]+\.[0-9]+" --include=*.cpp --include=*.h --include=*.txt --include=*.cmake . | head -20 || true
-          echo "=== workflows ==="; ls .github/workflows 2>/dev/null || echo none
+          git log -1 --format='%H %ad %s'
+          echo "=== dc_options ==="; sed -n 1,90p Telegram/SourceFiles/mtproto/mtproto_dc_options.cpp
+          echo "=== RSA places ==="; grep -n -B2 -A12 'BEGIN RSA PUBLIC KEY' Telegram/SourceFiles/mtproto/mtproto_dc_options.cpp | head -80
+          echo "=== win.yml ==="; head -220 .github/workflows/win.yml
+          echo "=== api id ==="; grep -rn -E "TDESKTOP_API_ID|TDESKTOP_API_HASH" --include=*.yml --include=*.cmake --include=CMakeLists.txt --include=*.md . | head -15
+          echo "=== docs build windows ==="; ls docs | head -20
