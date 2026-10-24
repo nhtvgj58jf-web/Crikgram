@@ -5,6 +5,11 @@ Env: SERVER_IP, RSA_PUBLIC_PEM (любой формат PEM), APP_PACKAGE, APP_N
 import os, re, sys, hashlib, uuid, pathlib
 from cryptography.hazmat.primitives import serialization
 
+# На Windows-раннере stdout в cp1252: русские сообщения роняли скрипт (UnicodeEncodeError)
+for _s in (sys.stdout, sys.stderr):
+    try: _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception: pass
+
 OLD_IP = "192.168.1.100"
 OLD_FP = "0xce27f5081215bda4"  # отпечаток ключа авторов (Android Handshake.cpp)
 
@@ -89,13 +94,13 @@ def android(root):
         edit(find(root, f), lambda s: re.sub(PEM_RE, lambda m: c_literal(pem), s, flags=re.S))
     edit(find(root, "Handshake.cpp"), lambda s: re.sub(re.escape(OLD_FP), fp, s, flags=re.I))
     for gp in pathlib.Path(root).rglob("gradle.properties"):
-        s = gp.read_text()
+        s = gp.read_text(encoding="utf-8", errors="ignore")
         if "APP_PACKAGE" in s:
-            gp.write_text(re.sub(r"^APP_PACKAGE\s*=.*$", "APP_PACKAGE=" + pkg, s, flags=re.M)); print("OK", gp)
+            gp.write_text(re.sub(r"^APP_PACKAGE\s*=.*$", "APP_PACKAGE=" + pkg, s, flags=re.M), encoding="utf-8"); print("OK", gp)
     for gj in pathlib.Path(root).rglob("google-services.json"):
         add_client(gj, pkg)
     for bg in pathlib.Path(root).rglob("build.gradle*"):  # диагностика: где задан applicationId
-        for i, l in enumerate(bg.read_text(errors="ignore").splitlines(), 1):
+        for i, l in enumerate(bg.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
             if "applicationId" in l or "APP_PACKAGE" in l: print("APPID", bg, i, l.strip()[:120])
     if name:
         for x in pathlib.Path(root).rglob("strings*.xml"):
@@ -140,17 +145,17 @@ def desktop(root):
     # version.h: сначала родной путь tdesktop, иначе первый найденный
     v = pathlib.Path(root) / "Telegram" / "SourceFiles" / "core" / "version.h"
     if not v.exists(): v = pathlib.Path(find(root, "version.h"))
-    s = v.read_text(); n = s
+    s = v.read_text(encoding="utf-8", errors="ignore"); n = s
     if pkg:  # свой GUID установщика/приложения, детерминированный
         g = "{%s}" % str(uuid.uuid5(uuid.NAMESPACE_DNS, pkg)).upper()
         n = re.sub(r'(AppId\s*=\s*)"\{[0-9A-Fa-f-]+\}"', r'\1"%s"' % g, n)
     if name:  # от имени зависит папка данных (tdata) и блокировка второго экземпляра
         n = re.sub(r'(AppName\s*=\s*)"[^"]*"', r'\1"%s"' % name, n)
     if n == s: print("ВНИМАНИЕ: version.h не изменился (AppId/AppName не найдены):", v)
-    else: v.write_text(n); print("OK", v)
+    else: v.write_text(n, encoding="utf-8"); print("OK", v)
 
 if __name__ == "__main__":
     if len(sys.argv) != 3: die(__doc__)
     {"android": android, "desktop": desktop}[sys.argv[1]](sys.argv[2])
-    left = [p for p in pathlib.Path(sys.argv[2]).rglob("*.cpp") if OLD_IP in p.read_text(errors="ignore")]
+    left = [p for p in pathlib.Path(sys.argv[2]).rglob("*.cpp") if OLD_IP in p.read_text(encoding="utf-8", errors="ignore")]
     if left: die("осталась заглушка IP: %s" % left)
