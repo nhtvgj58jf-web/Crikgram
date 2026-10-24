@@ -154,6 +154,21 @@ def desktop(root):
     if n == s: print("ВНИМАНИЕ: version.h не изменился (AppId/AppName не найдены):", v)
     else: v.write_text(n, encoding="utf-8"); print("OK", v)
 
+    # prepare.py ставит msys2-пакеты. В репозитории mingw64 больше нет mingw-w64-x86_64-diffutils
+    # (pacman: "target not found", сборка библиотек падала на шаге 2/33).
+    # Обычный msys-пакет diffutils есть, и в PATH prepare.py стоит именно msys64\\usr\\bin.
+    # Патчим ДО шага кэша: ключ кэша считается от хэша prepare.py, он должен совпасть при restore и save.
+    pp = pathlib.Path(root) / "Telegram" / "build" / "prepare" / "prepare.py"
+    if pp.exists():
+        t = pp.read_text(encoding="utf-8", errors="ignore")
+        if "mingw-w64-x86_64-diffutils" in t:
+            pp.write_text(t.replace("mingw-w64-x86_64-diffutils", "diffutils"), encoding="utf-8")
+            print("OK", pp, "mingw-w64-x86_64-diffutils -> diffutils")
+        else:
+            print("prepare.py: mingw-w64-x86_64-diffutils не найден, правка не нужна")
+    else:
+        print("ВНИМАНИЕ: нет", pp)
+
 if __name__ == "__main__":
     if len(sys.argv) != 3: die(__doc__)
     {"android": android, "desktop": desktop}[sys.argv[1]](sys.argv[2])
