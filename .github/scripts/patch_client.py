@@ -37,13 +37,16 @@ def c_literal(pem):
     return " ".join('"%s\\n"' % l for l in pem.splitlines())
 
 PEM_RE = r'"-----BEGIN (?:RSA )?PUBLIC KEY-----.*?-----END (?:RSA )?PUBLIC KEY-----(?:\\n)?"'
-RAW_RE = r'R"\(-----BEGIN (?:RSA )?PUBLIC KEY-----.*?-----END (?:RSA )?PUBLIC KEY-----\s*\)"'
+# любой ключ в исходнике: от BEGIN до END, как бы он ни был записан
+# (raw-строка, "...\n" "...\n", или с переносами строк через \ в конце строки)
+KEY_SPAN_RE = re.compile(r'-----BEGIN (?:RSA )?PUBLIC KEY-----.*?-----END (?:RSA )?PUBLIC KEY-----', re.S)
+RAW_PREFIX_RE = re.compile(r'R"[^()\\\s]{0,16}\($')
 
 def edit(path, fn):
     p = pathlib.Path(path)
-    if not p.exists(): die("нет файла " + path)
+    if not p.exists(): die("нет файла " + str(path))
     s = p.read_text(encoding="utf-8", errors="ignore"); n = fn(s)
-    if n == s: die("ничего не изменилось в " + path)
+    if n == s: die("ничего не изменилось в " + str(path))
     p.write_text(n, encoding="utf-8"); print("OK", path)
 
 def find(root, name):
@@ -101,21 +104,49 @@ def android(root):
             if n != s: x.write_text(n, encoding="utf-8"); print("OK", x)
     print("Отпечаток:", fp)
 
+def replace_keys_any_format(s, pem):
+    """Заменяет ВСЕ ключи в тексте на pem, сохраняя обёртку (кавычки, R"(...)", переносы)."""
+    lines = pem.splitlines()
+    def repl(m):
+        raw = RAW_PREFIX_RE.search(s[:m.start()]) is not None
+        if raw:  # R"(...)": обычные переводы строк
+            return "\n".join(lines)
+        # обычная строка: \n + перенос строки через обратный слэш
+        return "\\n\\\n".join(lines)
+    return KEY_SPAN_RE.sub(repl, s)
+
 def desktop(root):
     k = load_key(); pem = pkcs1(k)
     name = os.environ.get("APP_NAME", "").strip()
     pkg = os.environ.get("APP_PACKAGE", "").strip()
     sub_all_ip(root + "/Telegram/SourceFiles/mtproto", {".cpp", ".h"})
-    edit(find(root, "mtproto_dc_options.cpp"),
-         lambda s: re.sub(RAW_RE, lambda m: 'R"(' + pem + '\n)"', s, flags=re.S))
-    v = pathlib.Path(find(root, "version.h"))
+
+    dc = find(root, "mtproto_dc_options.cpp")
+    s = pathlib.Path(dc).read_text(encoding="utf-8", errors="ignore")
+    found = len(KEY_SPAN_RE.findall(s))
+    if not found:
+        print("ДИАГНОСТИКА: ключ в формате BEGIN/END не найден в", dc)
+        for i, l in enumerate(s.splitlines(), 1):
+            if "PUBLIC KEY" in l or "RSA" in l or "Rsa" in l:
+                print("  строка", i, repr(l[:160]))
+        die("не нашёл RSA-ключ в %s (смотри ДИАГНОСТИКА выше)" % dc)
+    n = replace_keys_any_format(s, pem)
+    if n == s:
+        print("ПРЕДУПРЕЖДЕНИЕ: ключ в файле уже совпадает с твоим, правка не нужна")
+    else:
+        pathlib.Path(dc).write_text(n, encoding="utf-8")
+    print("OK", dc, "ключей заменено:", found)
+
+    # version.h: сначала родной путь tdesktop, иначе первый найденный
+    v = pathlib.Path(root) / "Telegram" / "SourceFiles" / "core" / "version.h"
+    if not v.exists(): v = pathlib.Path(find(root, "version.h"))
     s = v.read_text(); n = s
     if pkg:  # свой GUID установщика/приложения, детерминированный
         g = "{%s}" % str(uuid.uuid5(uuid.NAMESPACE_DNS, pkg)).upper()
         n = re.sub(r'(AppId\s*=\s*)"\{[0-9A-Fa-f-]+\}"', r'\1"%s"' % g, n)
     if name:  # от имени зависит папка данных (tdata) и блокировка второго экземпляра
         n = re.sub(r'(AppName\s*=\s*)"[^"]*"', r'\1"%s"' % name, n)
-    if n == s: print("ВНИМАНИЕ: version.h не изменился (AppId/AppName не найдены)")
+    if n == s: print("ВНИМАНИЕ: version.h не изменился (AppId/AppName не найдены):", v)
     else: v.write_text(n); print("OK", v)
 
 if __name__ == "__main__":
