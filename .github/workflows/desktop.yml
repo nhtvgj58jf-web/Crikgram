@@ -1,0 +1,78 @@
+name: Windows-EXE
+on:
+  workflow_dispatch:
+    inputs:
+      app_package:
+        description: "Свой id (для GUID приложения)"
+        default: "app.crikgram.messenger"
+      app_name:
+        description: "Имя приложения (задаёт папку данных)"
+        default: "Crikgram Desktop"
+      client_repo:
+        default: "loyldg/mytelegram-tdesktop"
+      client_ref:
+        default: "layer224"
+      config:
+        default: "Release"
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v4
+        with: { path: own }
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.client_repo }}
+          ref: ${{ inputs.client_ref }}
+          submodules: recursive
+          path: TBuild/tdesktop
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install cryptography
+      - name: Patch server + app id
+        shell: bash
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          RSA_PUBLIC_PEM: ${{ secrets.RSA_PUBLIC_PEM }}
+          APP_PACKAGE: ${{ inputs.app_package }}
+          APP_NAME: ${{ inputs.app_name }}
+        run: python own/.github/scripts/patch_client.py desktop TBuild/tdesktop
+      - uses: ilammy/msvc-dev-cmd@v1
+        with: { arch: x64 }
+      - name: Cache libraries
+        id: libs
+        uses: actions/cache@v4
+        with:
+          path: |
+            TBuild/Libraries
+            TBuild/ThirdParty
+          key: libs-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/prepare.py') }}
+      - name: Build libraries (долго, первый раз 2-4 ч)
+        if: steps.libs.outputs.cache-hit != 'true'
+        shell: cmd
+        working-directory: TBuild
+        run: python tdesktop\Telegram\build\prepare\prepare.py silent
+      - name: Save libraries cache
+        if: steps.libs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            TBuild/Libraries
+            TBuild/ThirdParty
+          key: libs-${{ hashFiles('TBuild/tdesktop/Telegram/build/prepare/prepare.py') }}
+      - name: Configure
+        shell: cmd
+        working-directory: TBuild/tdesktop/Telegram
+        run: configure.bat x64 -D TDESKTOP_API_TEST=ON -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON
+      - name: Build
+        shell: cmd
+        working-directory: TBuild/tdesktop
+        run: cmake --build out --config ${{ inputs.config }} --parallel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crikgram-windows-${{ inputs.config }}
+          path: |
+            TBuild/tdesktop/out/${{ inputs.config }}/Telegram.exe
+            TBuild/tdesktop/out/${{ inputs.config }}/Updater.exe
